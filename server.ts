@@ -81,12 +81,12 @@ async function startServer() {
     res.json({ reserved: reservedIds });
   });
 
-  // Create a reservation
+  // Create a reservation (handles multiple IDs)
   app.post("/api/reserve", (req, res) => {
-    const { ipad_id, fecha, bloque_horario, docente, curso } = req.body;
+    const { ipad_ids, fecha, bloque_horario, docente, curso } = req.body;
 
-    if (!ipad_id || !fecha || !bloque_horario || !docente) {
-      return res.status(400).json({ error: "Faltan campos obligatorios" });
+    if (!ipad_ids || !Array.isArray(ipad_ids) || ipad_ids.length === 0 || !fecha || !bloque_horario || !docente) {
+      return res.status(400).json({ error: "Faltan campos obligatorios o formato inválido" });
     }
 
     // Validate Monday to Friday
@@ -96,19 +96,55 @@ async function startServer() {
       return res.status(400).json({ error: "Solo se permiten reservas de lunes a viernes" });
     }
 
+    const insert = db.prepare(`
+      INSERT INTO reservations (ipad_id, fecha, bloque_horario, docente, curso)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    const transaction = db.transaction((ids: number[]) => {
+      for (const id of ids) {
+        insert.run(id, fecha, bloque_horario, docente, curso || "");
+      }
+    });
+
     try {
-      const stmt = db.prepare(`
-        INSERT INTO reservations (ipad_id, fecha, bloque_horario, docente, curso)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      stmt.run(ipad_id, fecha, bloque_horario, docente, curso || "");
+      transaction(ipad_ids);
       res.json({ success: true });
     } catch (error: any) {
       if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
-        res.status(409).json({ error: "Este iPad ya está reservado para este bloque y fecha" });
+        res.status(409).json({ error: "Uno o más iPads ya están reservados para este bloque y fecha" });
       } else {
+        console.error(error);
         res.status(500).json({ error: "Error al procesar la reserva" });
       }
+    }
+  });
+
+  // Return/Release iPads
+  app.post("/api/return", (req, res) => {
+    const { ipad_ids, fecha, bloque_horario } = req.body;
+
+    if (!ipad_ids || !Array.isArray(ipad_ids) || ipad_ids.length === 0 || !fecha || !bloque_horario) {
+      return res.status(400).json({ error: "Faltan campos obligatorios" });
+    }
+
+    const remove = db.prepare(`
+      DELETE FROM reservations 
+      WHERE ipad_id = ? AND fecha = ? AND bloque_horario = ?
+    `);
+
+    const transaction = db.transaction((ids: number[]) => {
+      for (const id of ids) {
+        remove.run(id, fecha, bloque_horario);
+      }
+    });
+
+    try {
+      transaction(ipad_ids);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: "Error al liberar los iPads" });
     }
   });
 

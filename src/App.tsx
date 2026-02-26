@@ -41,7 +41,7 @@ export default function App() {
   const [bloque, setBloque] = useState(BLOQUES[0]);
   const [docente, setDocente] = useState('');
   const [curso, setCurso] = useState('');
-  const [selectedIpad, setSelectedIpad] = useState<number | null>(null);
+  const [selectedIpads, setSelectedIpads] = useState<number[]>([]);
   const [reservedIpads, setReservedIpads] = useState<number[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
@@ -91,8 +91,8 @@ export default function App() {
 
   const handleReserve = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedIpad || !docente) {
-      setMessage({ type: 'error', text: 'Selecciona un iPad y completa el nombre del docente' });
+    if (selectedIpads.length === 0 || !docente) {
+      setMessage({ type: 'error', text: 'Selecciona al menos un iPad y completa el nombre del docente' });
       return;
     }
 
@@ -102,7 +102,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ipad_id: selectedIpad,
+          ipad_ids: selectedIpads,
           fecha,
           bloque_horario: bloque,
           docente,
@@ -113,12 +113,51 @@ export default function App() {
       const data = await res.json();
       if (res.ok) {
         setMessage({ type: 'success', text: 'Reserva confirmada exitosamente' });
-        setSelectedIpad(null);
+        setSelectedIpads([]);
         fetchAvailability();
         fetchStats();
         fetchReservations();
       } else {
         setMessage({ type: 'error', text: data.error || 'Error al reservar' });
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Error de conexión' });
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMessage(null), 5000);
+    }
+  };
+
+  const handleReturn = async () => {
+    if (selectedIpads.length === 0) {
+      setMessage({ type: 'error', text: 'Selecciona los iPads que deseas devolver' });
+      return;
+    }
+
+    const confirmReturn = window.confirm(`¿Estás seguro de que deseas devolver ${selectedIpads.length} iPad(s)?`);
+    if (!confirmReturn) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/return', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ipad_ids: selectedIpads,
+          fecha,
+          bloque_horario: bloque
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setMessage({ type: 'success', text: 'iPads devueltos exitosamente' });
+        setSelectedIpads([]);
+        fetchAvailability();
+        fetchStats();
+        fetchReservations();
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Error al devolver' });
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'Error de conexión' });
@@ -251,24 +290,39 @@ export default function App() {
               </div>
 
               <div className="md:col-span-2 space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">iPad Seleccionado</label>
-                <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg ${selectedIpad ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'}`}>
-                    {selectedIpad || '?'}
-                  </div>
-                  <p className="text-sm text-slate-500 italic">
-                    {selectedIpad ? 'iPad listo para reservar.' : 'Haz click en un iPad de la cuadrícula inferior.'}
-                  </p>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">iPads Seleccionados ({selectedIpads.length})</label>
+                <div className="flex flex-wrap items-center gap-2 p-4 bg-slate-50 rounded-xl border border-slate-200 min-h-[80px]">
+                  {selectedIpads.length > 0 ? (
+                    selectedIpads.sort((a, b) => a - b).map(id => (
+                      <div key={id} className="w-10 h-10 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm animate-pop">
+                        {id}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-slate-500 italic">
+                      Haz click en los iPads de la cuadrícula inferior para seleccionarlos.
+                    </p>
+                  )}
                 </div>
               </div>
 
-              <button 
-                type="submit"
-                disabled={loading || !selectedIpad}
-                className="md:col-span-2 mt-2 bg-[#28a745] text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-green-200/50 hover:bg-green-600 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
-              >
-                {loading ? 'PROCESANDO...' : 'CONFIRMAR RESERVA'}
-              </button>
+              <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                <button 
+                  type="submit"
+                  disabled={loading || selectedIpads.length === 0}
+                  className="bg-[#28a745] text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-green-200/50 hover:bg-green-600 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+                >
+                  {loading ? 'PROCESANDO...' : 'RESERVAR'}
+                </button>
+                <button 
+                  type="button"
+                  onClick={handleReturn}
+                  disabled={loading || selectedIpads.length === 0}
+                  className="bg-[#28a745] text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-green-200/50 hover:bg-green-600 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 border-2 border-white/20"
+                >
+                  {loading ? 'PROCESANDO...' : 'DEVOLVER IPAD'}
+                </button>
+              </div>
             </form>
 
             <AnimatePresence>
@@ -366,17 +420,29 @@ export default function App() {
                 <div className="grid grid-cols-5 sm:grid-cols-6 gap-3">
                   {Array.from({ length: 30 }, (_, i) => i + 1).map(id => {
                     const isReserved = reservedIpads.includes(id);
-                    const isSelected = selectedIpad === id;
+                    const isSelected = selectedIpads.includes(id);
                     return (
                       <button
                         key={id}
-                        disabled={isReserved}
-                        onClick={() => setSelectedIpad(id)}
+                        onClick={() => {
+                          if (isReserved) {
+                            // If reserved, we can select it to "return" it
+                            setSelectedIpads(prev => 
+                              prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+                            );
+                          } else {
+                            // If available, we select it to "reserve" it
+                            setSelectedIpads(prev => 
+                              prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+                            );
+                          }
+                        }}
                         className={`
                           aspect-square rounded-xl flex items-center justify-center text-sm font-black transition-all
-                          ${isReserved ? 'bg-[#dc3545] text-white cursor-not-allowed opacity-80' : 
-                            isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 
-                            'bg-[#28a745] text-white hover:scale-105 hover:shadow-lg active:scale-95'}
+                          ${isReserved ? 
+                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 'bg-[#dc3545] text-white opacity-80') : 
+                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 'bg-[#28a745] text-white hover:scale-105 hover:shadow-lg active:scale-95')
+                          }
                         `}
                       >
                         {id}
@@ -392,17 +458,21 @@ export default function App() {
                 <div className="grid grid-cols-5 sm:grid-cols-6 gap-3">
                   {Array.from({ length: 30 }, (_, i) => i + 31).map(id => {
                     const isReserved = reservedIpads.includes(id);
-                    const isSelected = selectedIpad === id;
+                    const isSelected = selectedIpads.includes(id);
                     return (
                       <button
                         key={id}
-                        disabled={isReserved}
-                        onClick={() => setSelectedIpad(id)}
+                        onClick={() => {
+                          setSelectedIpads(prev => 
+                            prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+                          );
+                        }}
                         className={`
                           aspect-square rounded-xl flex items-center justify-center text-sm font-black transition-all
-                          ${isReserved ? 'bg-[#dc3545] text-white cursor-not-allowed opacity-80' : 
-                            isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 
-                            'bg-[#28a745] text-white hover:scale-105 hover:shadow-lg active:scale-95'}
+                          ${isReserved ? 
+                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 'bg-[#dc3545] text-white opacity-80') : 
+                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 'bg-[#28a745] text-white hover:scale-105 hover:shadow-lg active:scale-95')
+                          }
                         `}
                       >
                         {id}
