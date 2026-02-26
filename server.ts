@@ -27,6 +27,18 @@ db.exec(`
     UNIQUE(ipad_id, fecha, bloque_horario)
   );
 
+  CREATE TABLE IF NOT EXISTS history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    docente TEXT,
+    curso TEXT,
+    ipads TEXT, -- Comma separated list of IDs
+    fecha TEXT,
+    bloque_horario TEXT,
+    tipo TEXT, -- 'RESERVA' or 'DEVOLUCION'
+    novedades TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -67,18 +79,23 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Get availability for a specific date and block
+  // Get availability for a specific date (optionally filtered by block)
   app.get("/api/availability", (req, res) => {
     const { fecha, bloque } = req.query;
-    if (!fecha || !bloque) {
-      return res.status(400).json({ error: "Fecha y bloque son requeridos" });
+    if (!fecha) {
+      return res.status(400).json({ error: "Fecha es requerida" });
     }
 
-    const reserved = db.prepare("SELECT ipad_id FROM reservations WHERE fecha = ? AND bloque_horario = ?")
-      .all(fecha, bloque) as { ipad_id: number }[];
-    
-    const reservedIds = reserved.map(r => r.ipad_id);
-    res.json({ reserved: reservedIds });
+    let query = "SELECT ipad_id, bloque_horario FROM reservations WHERE fecha = ?";
+    const params: any[] = [fecha];
+
+    if (bloque) {
+      query += " AND bloque_horario = ?";
+      params.push(bloque);
+    }
+
+    const rows = db.prepare(query).all(...params) as { ipad_id: number, bloque_horario: string }[];
+    res.json({ reserved: rows });
   });
 
   // Create a reservation (handles multiple IDs)
@@ -89,22 +106,21 @@ async function startServer() {
       return res.status(400).json({ error: "Faltan campos obligatorios o formato inválido" });
     }
 
-    // Validate Monday to Friday
-    const date = new Date(fecha);
-    const day = date.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat
-    if (day === 0 || day === 6) {
-      return res.status(400).json({ error: "Solo se permiten reservas de lunes a viernes" });
-    }
-
-    const insert = db.prepare(`
+    const insertRes = db.prepare(`
       INSERT INTO reservations (ipad_id, fecha, bloque_horario, docente, curso)
       VALUES (?, ?, ?, ?, ?)
     `);
 
+    const insertHistory = db.prepare(`
+      INSERT INTO history (docente, curso, ipads, fecha, bloque_horario, tipo, novedades)
+      VALUES (?, ?, ?, ?, ?, 'RESERVA', '')
+    `);
+
     const transaction = db.transaction((ids: number[]) => {
       for (const id of ids) {
-        insert.run(id, fecha, bloque_horario, docente, curso || "");
+        insertRes.run(id, fecha, bloque_horario, docente, curso || "");
       }
+      insertHistory.run(docente, curso || "", ids.join(", "), fecha, bloque_horario);
     });
 
     try {
@@ -122,36 +138,71 @@ async function startServer() {
 
   // Return/Release iPads
   app.post("/api/return", (req, res) => {
-    const { ipad_ids, fecha, bloque_horario } = req.body;
+    const { ipad_ids, fecha, docente, curso, novedades } = req.body;
 
-    if (!ipad_ids || !Array.isArray(ipad_ids) || ipad_ids.length === 0 || !fecha || !bloque_horario) {
+    if (!ipad_ids || !Array.isArray(ipad_ids) || ipad_ids.length === 0 || !fecha) {
       return res.status(400).json({ error: "Faltan campos obligatorios" });
     }
 
+    // Prevent modifications to past days (using string comparison for YYYY-MM-DD)
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    if (fecha < todayStr) {
+      return res.status(400).json({ error: "No se pueden realizar devoluciones de días anteriores" });
+    }
+
+    // Find which blocks are actually being released for the history report
+    const getBlocks = db.prepare(`
+      SELECT bloque_horario FROM reservations 
+      WHERE ipad_id = ? AND fecha = ?
+    `);
+
     const remove = db.prepare(`
       DELETE FROM reservations 
-      WHERE ipad_id = ? AND fecha = ? AND bloque_horario = ?
+      WHERE ipad_id = ? AND fecha = ?
+    `);
+
+    const insertHistory = db.prepare(`
+      INSERT INTO history (docente, curso, ipads, fecha, bloque_horario, tipo, novedades)
+      VALUES (?, ?, ?, ?, ?, 'DEVOLUCION', ?)
     `);
 
     const transaction = db.transaction((ids: number[]) => {
+      const releasedBlocks = new Set<string>();
+      
       for (const id of ids) {
-        remove.run(id, fecha, bloque_horario);
+        const rows = getBlocks.all(id, fecha) as { bloque_horario: string }[];
+        if (rows.length > 0) {
+          rows.forEach(r => releasedBlocks.add(r.bloque_horario));
+          remove.run(id, fecha);
+        }
       }
+      
+      if (releasedBlocks.size > 0) {
+        const blocksStr = Array.from(releasedBlocks).join(", ");
+        insertHistory.run(docente || "N/A", curso || "N/A", ids.join(", "), fecha, blocksStr, novedades || "");
+        return true;
+      }
+      return false;
     });
 
     try {
-      transaction(ipad_ids);
-      res.json({ success: true });
+      const result = transaction(ipad_ids);
+      if (result) {
+        res.json({ success: true });
+      } else {
+        res.status(404).json({ error: "No se encontraron reservas activas para los iPads seleccionados en esta fecha" });
+      }
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: "Error al liberar los iPads" });
     }
   });
 
-  // Get all reservations with filters
+  // Get all history with filters
   app.get("/api/reservations", (req, res) => {
-    const { month, year, docente, ipad_id } = req.query;
-    let query = "SELECT * FROM reservations WHERE 1=1";
+    const { month, year, docente } = req.query;
+    let query = "SELECT * FROM history WHERE 1=1";
     const params: any[] = [];
 
     if (month && year) {
@@ -162,12 +213,8 @@ async function startServer() {
       query += " AND docente LIKE ?";
       params.push(`%${docente}%`);
     }
-    if (ipad_id) {
-      query += " AND ipad_id = ?";
-      params.push(ipad_id);
-    }
 
-    query += " ORDER BY fecha DESC, bloque_horario ASC";
+    query += " ORDER BY timestamp DESC";
     const rows = db.prepare(query).all(...params);
     res.json(rows);
   });
@@ -224,28 +271,30 @@ async function startServer() {
     const m = month.padStart(2, '0');
     const y = year;
 
-    const reservations = db.prepare(`
-      SELECT * FROM reservations 
+    const history = db.prepare(`
+      SELECT * FROM history 
       WHERE strftime('%m', fecha) = ? AND strftime('%Y', fecha) = ?
-      ORDER BY fecha ASC, bloque_horario ASC
+      ORDER BY timestamp DESC
     `).all(m, y) as any[];
 
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet("Reservas");
+    const sheet = workbook.addWorksheet("Historial");
 
     // Header
     sheet.columns = [
       { header: "ID", key: "id", width: 10 },
-      { header: "iPad", key: "ipad_id", width: 10 },
-      { header: "Fecha", key: "fecha", width: 15 },
+      { header: "Tipo", key: "tipo", width: 15 },
+      { header: "iPads", key: "ipads", width: 30 },
+      { header: "Fecha Uso", key: "fecha", width: 15 },
       { header: "Bloque", key: "bloque_horario", width: 20 },
       { header: "Docente", key: "docente", width: 30 },
       { header: "Curso", key: "curso", width: 20 },
+      { header: "Novedades", key: "novedades", width: 40 },
       { header: "Registro", key: "timestamp", width: 25 },
     ];
 
     sheet.getRow(1).font = { bold: true };
-    sheet.addRows(reservations);
+    sheet.addRows(history);
 
     // Stats Sheet
     const statsSheet = workbook.addWorksheet("Estadísticas");

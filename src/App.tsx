@@ -37,12 +37,13 @@ const StatCard = ({ label, value, icon: Icon }: any) => (
 );
 
 export default function App() {
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
+  const [fecha, setFecha] = useState(new Date().toLocaleDateString('en-CA'));
   const [bloque, setBloque] = useState(BLOQUES[0]);
   const [docente, setDocente] = useState('');
   const [curso, setCurso] = useState('');
+  const [novedades, setNovedades] = useState('');
   const [selectedIpads, setSelectedIpads] = useState<number[]>([]);
-  const [reservedIpads, setReservedIpads] = useState<number[]>([]);
+  const [reservedIpads, setReservedIpads] = useState<{ipad_id: number, bloque_horario: string}[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [bgUrl, setBgUrl] = useState('');
@@ -72,7 +73,7 @@ export default function App() {
   };
 
   const fetchAvailability = async () => {
-    const res = await fetch(`/api/availability?fecha=${fecha}&bloque=${encodeURIComponent(bloque)}`);
+    const res = await fetch(`/api/availability?fecha=${fecha}`);
     const data = await res.json();
     setReservedIpads(data.reserved || []);
   };
@@ -134,7 +135,18 @@ export default function App() {
       return;
     }
 
-    const confirmReturn = window.confirm(`¿Estás seguro de que deseas devolver ${selectedIpads.length} iPad(s)?`);
+    // Check if date is in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const targetDate = new Date(fecha);
+    targetDate.setHours(0, 0, 0, 0);
+
+    if (targetDate < today) {
+      setMessage({ type: 'error', text: 'No se pueden realizar devoluciones de días anteriores' });
+      return;
+    }
+
+    const confirmReturn = window.confirm(`¿Estás seguro de que deseas devolver ${selectedIpads.length} iPad(s)? Se liberarán todos los bloques reservados para este día.`);
     if (!confirmReturn) return;
 
     setLoading(true);
@@ -145,7 +157,9 @@ export default function App() {
         body: JSON.stringify({
           ipad_ids: selectedIpads,
           fecha,
-          bloque_horario: bloque
+          docente,
+          curso,
+          novedades
         })
       });
 
@@ -153,6 +167,7 @@ export default function App() {
       if (res.ok) {
         setMessage({ type: 'success', text: 'iPads devueltos exitosamente' });
         setSelectedIpads([]);
+        setNovedades('');
         fetchAvailability();
         fetchStats();
         fetchReservations();
@@ -306,6 +321,16 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="md:col-span-2 space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Novedades / Observaciones (Opcional)</label>
+                <textarea 
+                  placeholder="Detalla cualquier novedad o problema con los equipos..."
+                  value={novedades}
+                  onChange={(e) => setNovedades(e.target.value)}
+                  className="w-full px-4 py-3 bg-white/50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium min-h-[100px] resize-none"
+                />
+              </div>
+
               <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
                 <button 
                   type="submit"
@@ -414,51 +439,15 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-              {/* iPads 1-30 */}
+              {/* iPads Negras 1-30 */}
               <div>
-                <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Lote A (1-30)</h3>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Ipads Negras (1-30)</h3>
                 <div className="grid grid-cols-5 sm:grid-cols-6 gap-3">
                   {Array.from({ length: 30 }, (_, i) => i + 1).map(id => {
-                    const isReserved = reservedIpads.includes(id);
+                    const isReservedInCurrentBlock = reservedIpads.some(r => r.ipad_id === id && r.bloque_horario === bloque);
+                    const isReservedInOtherBlock = reservedIpads.some(r => r.ipad_id === id && r.bloque_horario !== bloque);
                     const isSelected = selectedIpads.includes(id);
-                    return (
-                      <button
-                        key={id}
-                        onClick={() => {
-                          if (isReserved) {
-                            // If reserved, we can select it to "return" it
-                            setSelectedIpads(prev => 
-                              prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-                            );
-                          } else {
-                            // If available, we select it to "reserve" it
-                            setSelectedIpads(prev => 
-                              prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-                            );
-                          }
-                        }}
-                        className={`
-                          aspect-square rounded-xl flex items-center justify-center text-sm font-black transition-all
-                          ${isReserved ? 
-                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 'bg-[#dc3545] text-white opacity-80') : 
-                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 'bg-[#28a745] text-white hover:scale-105 hover:shadow-lg active:scale-95')
-                          }
-                        `}
-                      >
-                        {id}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* iPads 31-60 */}
-              <div>
-                <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Lote B (31-60)</h3>
-                <div className="grid grid-cols-5 sm:grid-cols-6 gap-3">
-                  {Array.from({ length: 30 }, (_, i) => i + 31).map(id => {
-                    const isReserved = reservedIpads.includes(id);
-                    const isSelected = selectedIpads.includes(id);
+                    
                     return (
                       <button
                         key={id}
@@ -468,14 +457,56 @@ export default function App() {
                           );
                         }}
                         className={`
-                          aspect-square rounded-xl flex items-center justify-center text-sm font-black transition-all
-                          ${isReserved ? 
-                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 'bg-[#dc3545] text-white opacity-80') : 
-                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110' : 'bg-[#28a745] text-white hover:scale-105 hover:shadow-lg active:scale-95')
+                          aspect-square rounded-xl flex items-center justify-center text-sm font-black transition-all relative
+                          ${(isReservedInCurrentBlock || isReservedInOtherBlock) ? 
+                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110 z-10' : 
+                             isReservedInCurrentBlock ? 'bg-[#dc3545] text-white opacity-80' : 'bg-[#dc3545]/40 text-white') : 
+                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110 z-10' : 'bg-[#28a745] text-white hover:scale-105 hover:shadow-lg active:scale-95')
                           }
                         `}
+                        title={isReservedInOtherBlock && !isReservedInCurrentBlock ? 'Reservado en otro bloque hoy' : ''}
                       >
                         {id}
+                        {isReservedInOtherBlock && !isReservedInCurrentBlock && (
+                          <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-white rounded-full" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* iPads Verdes 31-60 */}
+              <div>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Ipads Verdes (31-60)</h3>
+                <div className="grid grid-cols-5 sm:grid-cols-6 gap-3">
+                  {Array.from({ length: 30 }, (_, i) => i + 31).map(id => {
+                    const isReservedInCurrentBlock = reservedIpads.some(r => r.ipad_id === id && r.bloque_horario === bloque);
+                    const isReservedInOtherBlock = reservedIpads.some(r => r.ipad_id === id && r.bloque_horario !== bloque);
+                    const isSelected = selectedIpads.includes(id);
+                    
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => {
+                          setSelectedIpads(prev => 
+                            prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+                          );
+                        }}
+                        className={`
+                          aspect-square rounded-xl flex items-center justify-center text-sm font-black transition-all relative
+                          ${(isReservedInCurrentBlock || isReservedInOtherBlock) ? 
+                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110 z-10' : 
+                             isReservedInCurrentBlock ? 'bg-[#dc3545] text-white opacity-80' : 'bg-[#dc3545]/40 text-white') : 
+                            (isSelected ? 'bg-blue-600 text-white ring-4 ring-blue-200 scale-110 z-10' : 'bg-[#28a745] text-white hover:scale-105 hover:shadow-lg active:scale-95')
+                          }
+                        `}
+                        title={isReservedInOtherBlock && !isReservedInCurrentBlock ? 'Reservado en otro bloque hoy' : ''}
+                      >
+                        {id}
+                        {isReservedInOtherBlock && !isReservedInCurrentBlock && (
+                          <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-white rounded-full" />
+                        )}
                       </button>
                     );
                   })}
@@ -527,24 +558,34 @@ export default function App() {
               <table className="w-full text-left border-separate border-spacing-y-2">
                 <thead>
                   <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                    <th className="px-6 py-3">Fecha</th>
-                    <th className="px-6 py-3">Bloque</th>
-                    <th className="px-6 py-3">iPad</th>
+                    <th className="px-6 py-3">Tipo</th>
+                    <th className="px-6 py-3">iPads</th>
                     <th className="px-6 py-3">Docente</th>
                     <th className="px-6 py-3">Curso</th>
+                    <th className="px-6 py-3">Novedades</th>
                     <th className="px-6 py-3">Registro</th>
                   </tr>
                 </thead>
                 <tbody>
                   {reservations.length > 0 ? reservations.map((res) => (
                     <tr key={res.id} className="bg-slate-50 hover:bg-white hover:shadow-md transition-all group">
-                      <td className="px-6 py-4 rounded-l-2xl font-bold text-sm text-slate-700">{res.fecha}</td>
-                      <td className="px-6 py-4 text-xs font-medium text-slate-500">{res.bloque_horario.split(' ')[0]}</td>
+                      <td className="px-6 py-4 rounded-l-2xl">
+                        <span className={`px-3 py-1 rounded-lg text-[10px] font-black ${res.tipo === 'RESERVA' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                          {res.tipo}
+                        </span>
+                      </td>
                       <td className="px-6 py-4">
-                        <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-lg text-xs font-black">#{res.ipad_id}</span>
+                        <div className="flex flex-wrap gap-1 max-w-[200px]">
+                          {res.ipads.split(',').map((id: string) => (
+                            <span key={id} className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-[10px] font-bold">#{id.trim()}</span>
+                          ))}
+                        </div>
                       </td>
                       <td className="px-6 py-4 font-bold text-sm">{res.docente}</td>
                       <td className="px-6 py-4 text-sm text-slate-500">{res.curso || '—'}</td>
+                      <td className="px-6 py-4 text-xs text-slate-500 max-w-[200px] truncate" title={res.novedades}>
+                        {res.novedades || '—'}
+                      </td>
                       <td className="px-6 py-4 rounded-r-2xl text-[10px] text-slate-400 font-mono">
                         {new Date(res.timestamp).toLocaleString()}
                       </td>
