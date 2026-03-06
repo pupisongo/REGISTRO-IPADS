@@ -40,7 +40,7 @@ const StatCard = ({ label, value, icon: Icon }: any) => (
 
 export default function App() {
   const [fecha, setFecha] = useState(new Date().toLocaleDateString('en-CA'));
-  const [bloque, setBloque] = useState("General");
+  const [bloque, setBloque] = useState(BLOQUES[0]);
   const [docente, setDocente] = useState('');
   const [curso, setCurso] = useState('');
   const [novedades, setNovedades] = useState('');
@@ -487,6 +487,7 @@ export default function App() {
                   <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
                     <th className="px-6 py-3">Tipo</th>
                     <th className="px-6 py-3">iPads</th>
+                    <th className="px-6 py-3">Fecha de Uso</th>
                     <th className="px-6 py-3">Docente</th>
                     <th className="px-6 py-3">Curso</th>
                     <th className="px-6 py-3">Novedades</th>
@@ -507,6 +508,12 @@ export default function App() {
                           {res.ipads.split(',').map((id: string) => (
                             <span key={id} className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-[10px] font-bold">#{id.trim()}</span>
                           ))}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-slate-700">{res.fecha}</span>
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">{res.bloque_horario}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 font-bold text-sm">{res.docente}</td>
@@ -607,6 +614,21 @@ export default function App() {
                       className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold"
                       required
                     />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Bloque Horario</label>
+                  <div className="relative">
+                    <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <select 
+                      value={bloque}
+                      onChange={(e) => setBloque(e.target.value)}
+                      className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold appearance-none"
+                      required
+                    >
+                      {BLOQUES.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
                   </div>
                 </div>
 
