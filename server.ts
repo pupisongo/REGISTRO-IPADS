@@ -138,17 +138,10 @@ async function startServer() {
 
   // Return/Release iPads
   app.post("/api/return", (req, res) => {
-    const { ipad_ids, fecha, docente, curso, novedades } = req.body;
+    const { ipad_ids, fecha, docente, curso, novedades, bloque_horario } = req.body;
 
     if (!ipad_ids || !Array.isArray(ipad_ids) || ipad_ids.length === 0 || !fecha) {
       return res.status(400).json({ error: "Faltan campos obligatorios" });
-    }
-
-    // Prevent modifications to past days (using string comparison for YYYY-MM-DD)
-    const todayStr = new Date().toISOString().split('T')[0];
-    
-    if (fecha < todayStr) {
-      return res.status(400).json({ error: "No se pueden realizar devoluciones de días anteriores" });
     }
 
     // Find which blocks are actually being released for the history report
@@ -169,17 +162,19 @@ async function startServer() {
 
     const transaction = db.transaction((ids: number[]) => {
       const releasedBlocks = new Set<string>();
+      let deletedAny = false;
       
       for (const id of ids) {
         const rows = getBlocks.all(id, fecha) as { bloque_horario: string }[];
         if (rows.length > 0) {
           rows.forEach(r => releasedBlocks.add(r.bloque_horario));
           remove.run(id, fecha);
+          deletedAny = true;
         }
       }
       
-      if (releasedBlocks.size > 0) {
-        const blocksStr = Array.from(releasedBlocks).join(", ");
+      if (deletedAny) {
+        const blocksStr = Array.from(releasedBlocks).join(", ") || bloque_horario || "Cualquier Bloque";
         insertHistory.run(docente || "N/A", curso || "N/A", ids.join(", "), fecha, blocksStr, novedades || "");
         return true;
       }
@@ -191,7 +186,14 @@ async function startServer() {
       if (result) {
         res.json({ success: true });
       } else {
-        res.status(404).json({ error: "No se encontraron reservas activas para los iPads seleccionados en esta fecha" });
+        // Even if no reservations were found, the user wants to "generate the record"
+        // so we'll allow it if they forced it from history
+        const blocksStr = bloque_horario || "Cualquier Bloque";
+        db.prepare(`
+          INSERT INTO history (docente, curso, ipads, fecha, bloque_horario, tipo, novedades)
+          VALUES (?, ?, ?, ?, ?, 'DEVOLUCION', ?)
+        `).run(docente || "N/A", curso || "N/A", ipad_ids.join(", "), fecha, blocksStr, novedades || "");
+        res.json({ success: true, message: "Registro generado (sin reservas previas encontradas)" });
       }
     } catch (error: any) {
       console.error(error);
