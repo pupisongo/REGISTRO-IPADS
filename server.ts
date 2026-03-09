@@ -248,22 +248,12 @@ async function startServer() {
       LIMIT 1
     `).get(m, y) as { fecha: string, count: number };
 
-    const bloqueMasReservado = db.prepare(`
-      SELECT bloque_horario, COUNT(*) as count 
-      FROM reservations 
-      WHERE strftime('%m', fecha) = ? AND strftime('%Y', fecha) = ?
-      GROUP BY bloque_horario 
-      ORDER BY count DESC 
-      LIMIT 1
-    `).get(m, y) as { bloque_horario: string, count: number };
-
-    // Total possible slots in a month (approx 20 days * 8 blocks * 60 ipads)
+    // Total possible slots in a month (approx 20 days * 60 ipads)
     // For simplicity, let's just return the counts
     res.json({
       total: totalReservas.count,
       ipadMasUsado: ipadMasUsado?.ipad_id || "N/A",
-      diaMasDemanda: diaMasDemanda?.fecha || "N/A",
-      bloqueMasReservado: bloqueMasReservado?.bloque_horario || "N/A"
+      diaMasDemanda: diaMasDemanda?.fecha || "N/A"
     });
   });
 
@@ -287,8 +277,7 @@ async function startServer() {
       { header: "ID", key: "id", width: 10 },
       { header: "Tipo", key: "tipo", width: 15 },
       { header: "iPads", key: "ipads", width: 30 },
-      { header: "Fecha Uso", key: "fecha", width: 15 },
-      { header: "Bloque", key: "bloque_horario", width: 20 },
+      { header: "Fecha", key: "fecha", width: 15 },
       { header: "Docente", key: "docente", width: 30 },
       { header: "Curso", key: "curso", width: 20 },
       { header: "Novedades", key: "novedades", width: 40 },
@@ -309,14 +298,12 @@ async function startServer() {
     const stats = db.prepare(`
       SELECT 
         (SELECT COUNT(*) FROM reservations WHERE strftime('%m', fecha) = ? AND strftime('%Y', fecha) = ?) as total,
-        (SELECT ipad_id FROM reservations WHERE strftime('%m', fecha) = ? AND strftime('%Y', fecha) = ? GROUP BY ipad_id ORDER BY COUNT(*) DESC LIMIT 1) as top_ipad,
-        (SELECT bloque_horario FROM reservations WHERE strftime('%m', fecha) = ? AND strftime('%Y', fecha) = ? GROUP BY bloque_horario ORDER BY COUNT(*) DESC LIMIT 1) as top_block
-    `).get(m, y, m, y, m, y) as any;
+        (SELECT ipad_id FROM reservations WHERE strftime('%m', fecha) = ? AND strftime('%Y', fecha) = ? GROUP BY ipad_id ORDER BY COUNT(*) DESC LIMIT 1) as top_ipad
+    `).get(m, y, m, y) as any;
 
     statsSheet.addRows([
       { metric: "Total Reservas", value: stats.total },
       { metric: "iPad más utilizado", value: stats.top_ipad || "N/A" },
-      { metric: "Bloque más solicitado", value: stats.top_block || "N/A" },
     ]);
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
